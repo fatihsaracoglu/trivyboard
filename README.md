@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img src="images/logo.png" alt="logo" width="60">
+# <img src="docs/images/logo.png" alt="logo" width="60">
 
 **A vulnerability dashboard for [Aqua Security Trivy](https://trivy.dev)**
 
@@ -12,6 +12,19 @@ Scan Docker images, filesystems, and Git repositories; then triage vulnerabiliti
 </div>
 
 ---
+
+## Screenshots
+
+![Trivyboard vulnerability dashboard](docs/images/dashboard.png)
+
+
+![Trivyboard scan interface](docs/images/run-scan.png)
+
+
+![Trivyboard vulnerability detail](docs/images/vulnerability-detail.png)
+
+
+![Trivyboard statistics](docs/images/statistics.png)
 
 ## Features
 
