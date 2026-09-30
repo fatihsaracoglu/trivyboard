@@ -1,0 +1,11 @@
+{
+  "name": "trivyboard-backend",
+  "private": true,
+  "scripts": {
+    "dev": "go run .",
+    "build": "go build -o trivyboard-backend-bin .",
+    "start": "./trivyboard-backend-bin",
+    "test": "go test ./...",
+    "vet": "go vet ./..."
+  }
+}

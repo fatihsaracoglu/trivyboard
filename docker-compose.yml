@@ -1,0 +1,152 @@
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-internal
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+      - /run:rw,noexec,nosuid,size=1m,mode=0755
+
+  docker-socket-bridge:
+    image: alpine/socat:1.8.1.3
+    command: UNIX-LISTEN:/shared/docker.sock,fork,unlink-early,mode=660,uid=1000,gid=1000 TCP:docker-socket-proxy:2375
+    volumes:
+      - docker-proxy-socket:/shared
+    networks:
+      - docker-internal
+    depends_on:
+      - docker-socket-proxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+  trivy-data-init:
+    image: alpine:3.24
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        chown -R 1000:1000 /data
+        chmod 700 /data
+    volumes:
+      - trivy-data:/data
+    network_mode: none
+    read_only: true
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+
+  trivyboard-backend:
+    build:
+      context: ./trivyboard-backend
+      dockerfile: Dockerfile
+    expose:
+      - "3030"
+    environment:
+      SCAN_MODE: "async"
+      SCAN_PERSISTENCE: "sqlite"
+      DATABASE_URL: "/data/trivyboard.db"
+      # Comma-separated list of allowed root dirs for fs scans.
+      # Empty = fs scans rejected. Set this to your project directories.
+      SCANNABLE_ROOTS: "/workspace"
+      # Allowed git hosts for remote repo scans. Empty = remote git rejected.
+      ALLOWED_GIT_HOSTS: "github.com,gitlab.com"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-}"
+      DOCKER_SOCKET: "/var/run/docker-proxy/docker.sock"
+    volumes:
+      - trivy-data:/data
+      - trivy-cache:/var/cache/trivy
+      - ./workspace:/workspace:ro
+      # The bridged, restricted socket — not the host's real docker.sock.
+      - docker-proxy-socket:/var/run/docker-proxy:ro
+    networks:
+      - app
+      - docker-internal
+    depends_on:
+      docker-socket-bridge:
+        condition: service_started
+      trivy-data-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3030/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  trivyboard-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${TRIVYBOARD_BIND_ADDRESS:-127.0.0.1}:${TRIVYBOARD_PORT:-8080}:8080"
+    depends_on:
+      trivyboard-backend:
+        condition: service_healthy
+    networks:
+      - app
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  trivy-data:
+  trivy-cache:
+  docker-proxy-socket:
+
+networks:
+  app:
+  docker-internal:
+    internal: true

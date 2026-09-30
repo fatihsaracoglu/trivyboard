@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Type-check and build
+        run: bun run build
+
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: trivyboard-backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: trivyboard-backend/go.mod
+          cache-dependency-path: trivyboard-backend/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Static analysis
+        run: go vet ./...
+
+      - name: Test with race detection
+        run: go test -race -count=1 ./...
+
+      - name: Build production binary
+        env:
+          CGO_ENABLED: "0"
+        run: >
+          go build
+          -trimpath
+          -buildvcs=false
+          -ldflags="-s -w"
+          -o "${RUNNER_TEMP}/trivyboard-backend"
+          .
+
+  containers:
+    name: Production container checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [frontend, backend]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build frontend image
+        run: docker build --tag trivyboard-frontend:ci .
+
+      - name: Build backend image
+        run: >
+          docker build
+          --tag trivyboard-backend:ci
+          ./trivyboard-backend
+
+      - name: Validate Nginx configuration
+        run: >
+          docker run --rm
+          --add-host trivyboard-backend:127.0.0.1
+          --entrypoint nginx
+          trivyboard-frontend:ci
+          -t

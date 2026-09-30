@@ -1,0 +1,13 @@
+.git
+.github
+.env*
+!.env.example
+__MACOSX
+dist
+images
+node_modules
+trivyboard-backend
+workspace
+*.log
+*.tsbuildinfo
+README.md
